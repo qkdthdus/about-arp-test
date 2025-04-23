@@ -72,6 +72,8 @@ Mac getMacByIp(pcap_t* handle, Mac myMac, Ip myIp, Ip targetIp) {
 
     struct pcap_pkthdr* header;
     const u_char* reply;
+
+    //repeatedly send infected packets for deal with arp cashe recovery
     while (true) {
         int res = pcap_next_ex(handle, &header, &reply);
         if (res == 0) continue;
